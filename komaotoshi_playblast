@@ -1,0 +1,99 @@
+# -*- coding: utf-8 -*-
+import sys
+import getpass
+import maya.cmds as cmds
+
+from PySide2 import QtWidgets, QtGui
+import shiboken2
+import maya.OpenMayaUI as omui
+
+# ----------------------------------------------------------------------------
+# Get Maya main window as parent
+def get_maya_window():
+    ptr = omui.MQtUtil.mainWindow()
+    return shiboken2.wrapInstance(long(ptr), QtWidgets.QWidget)
+
+# Global variable for re-run safety
+window_instance = None
+
+# ----------------------------------------------------------------------------
+class NumberInputApp(QtWidgets.QDialog):
+    def __init__(self, parent=None):
+        super(NumberInputApp, self).__init__(parent)
+        self.setWindowTitle("Komaotoshi Playblast")
+        self.setMinimumWidth(300)
+
+        # Layout
+        layout = QtWidgets.QVBoxLayout(self)
+
+        # Input box
+        self.input_box = QtWidgets.QLineEdit("2")
+        self.input_box.setPlaceholderText(u"コマ落としフレームを入力してください")
+        self.input_box.setValidator(QtGui.QIntValidator())
+        layout.addWidget(self.input_box)
+
+        # Button
+        self.button = QtWidgets.QPushButton("Komaotoshi Playblast", self)
+        self.button.clicked.connect(self.komaotoshi)
+        layout.addWidget(self.button)
+
+    # ------------------------------------------------------------------------
+    def komaotoshi(self):
+        number = self.input_box.text()
+        if number:
+            user_name = getpass.getuser()
+            playblast_path = 'C:/Users/{}/Desktop/test.avi'.format(user_name)
+
+            render_width = cmds.getAttr('defaultResolution.width')
+            render_height = cmds.getAttr('defaultResolution.height')
+            start_frame = cmds.playbackOptions(q=True, min=True)
+            end_frame = cmds.playbackOptions(q=True, max=True)
+            bake_start_frame = start_frame+int(number)
+            bake_end_frame = end_frame+int(number)
+
+            # create komaotoshi node
+            cmds.createNode('animCurveTT', n='nkoma')
+
+            # create and bake keys
+            cmds.select('nkoma')
+            cmds.currentTime(bake_start_frame)
+            cmds.setKeyframe()
+            cmds.currentTime(bake_end_frame)
+            cmds.setKeyframe(v=bake_end_frame)
+            cmds.keyTangent(t=(bake_start_frame,bake_end_frame), itt='linear', ott='linear')
+            cmds.bakeResults(sb=number, t=(bake_start_frame, bake_end_frame))
+            cmds.keyTangent(t=(bake_start_frame,bake_end_frame), ott='step')
+            cmds.connectAttr('nkoma.apply', 'time1.timewarpIn.timewarpIn_Raw')
+            cmds.setAttr('time1.enableTimewarp', 1)
+
+            # playblast
+            cmds.setAttr('camShape.displayResolution', 0)
+            cmds.setAttr('camShape.displayGateMask', 0)
+            cmds.playblast(f=playblast_path, wh=(render_width,render_height), fo=True, os=True, p=100, qlt=100)
+            cmds.setAttr('camShape.displayResolution', 1)
+            cmds.setAttr('camShape.displayGateMask', 1)
+
+            # cleanup
+            cmds.disconnectAttr('nkoma.apply','time1.timewarpIn.timewarpIn_Raw')
+            cmds.setAttr('time1.enableTimewarp', 0)
+            cmds.delete('nkoma')
+        else:
+            cmds.warning(u"辻を入力してください!")
+
+# ----------------------------------------------------------------------------
+def show_ui():
+    global window_instance
+    if window_instance:  # close if it already exists
+        try:
+            window_instance.close()
+            window_instance.deleteLater()
+        except:
+            pass
+
+    parent = get_maya_window()
+    window_instance = NumberInputApp(parent)
+    window_instance.show()
+    return window_instance
+
+# Run
+show_ui()
